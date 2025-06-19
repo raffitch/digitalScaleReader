@@ -1,1 +1,4 @@
-#this is main
+#!/bin/bash
+# Simple wrapper to run the scale reader
+
+python3 scale_reader.py "$@"
