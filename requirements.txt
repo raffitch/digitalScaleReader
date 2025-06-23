@@ -1,4 +1,3 @@
 opencv-python-headless
-pytesseract
 pandas
 openpyxl

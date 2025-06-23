@@ -1,11 +1,10 @@
 # Digital Scale Reader
 
-This tool captures weight readings from a jewelry scale's LCD display using a webcam. It uses OCR (Tesseract) to read the digits and records each change in weight.
+This tool captures weight readings from a jewelry scale's LCD display using a webcam. The program automatically finds the green backlit screen, asks you to place a heavy object so all segments light up, then learns the position of each digit. After calibration it reads the seven-segment display and logs weight changes.
 
 ## Requirements
 
 * Python 3.10+
-* Tesseract OCR installed and accessible in your `PATH`
 * Python packages listed in `requirements.txt`
 
 Install packages via:
@@ -14,30 +13,24 @@ Install packages via:
 pip install -r requirements.txt
 ```
 
-On Debian/Ubuntu systems, you can install Tesseract with:
-
-```bash
-sudo apt-get install tesseract-ocr
-```
-
 ## Usage
 
 ```bash
-python scale_reader.py output.csv --roi X Y W H --camera 0
+python scale_reader.py output.csv --camera 0
 ```
 
 Arguments:
 
 - `output.csv`: Path to a CSV file where readings will be written. A matching Excel file (`.xlsx`) is also generated.
-- `--roi X Y W H`: Optional. Defines the region of interest containing the LCD display (top-left `X`,`Y` coordinates and width `W`/height `H`). If not provided, the full frame is used.
 - `--camera N`: Optional. Index of the webcam to use (default `0`).
+- `--debounce M`: Frames a reading must persist before logging (default `3`).
 
-While the program is running, a window shows the cropped display. Press `q` to stop recording. Each time a different weight reading is detected, it is logged with a timestamp.
+When started, the program detects the LCD region. It then prompts you to place a heavy weight on the scale so every digit shows `8`. Press `c` to capture the digit layout, remove the weight, and the program begins logging. Press `q` to stop.
 
 ## Example
 
 ```bash
-python scale_reader.py weights.csv --roi 100 150 200 80
+python scale_reader.py weights.csv --camera 0
 ```
 
-This records scale readings to `weights.csv` and `weights.xlsx`, using the specified ROI.
+This records scale readings to `weights.csv` after a one-time calibration with a heavy weight.
