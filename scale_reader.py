@@ -74,7 +74,7 @@ def find_green_roi(frame):
 def capture_scale(output_csv, camera_index=0, debounce=3):
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
-        raise RuntimeError(f"Cannot open camera {camera_index}")
+def capture_scale(output_csv, camera_index=0, debounce=3, debug=False):
 
     print("Detecting screen… hold scale steady")
     roi = None
@@ -141,6 +141,17 @@ def capture_scale(output_csv, camera_index=0, debounce=3):
                 if cv2.countNonZero(sub) > 0:
                     reading += '.'
 
+                if debug:
+                    cv2.rectangle(frame, (x0+x, y0), (x0+x+w, y0+h0),
+                                  (0,0,255), 1)
+                    h = sub.shape[0]
+                    for ((sx1,sy1),(sx2,sy2)) in SEGMENTS.values():
+                        xa, ya = int(sx1*w), int(sy1*h)
+                        xb, yb = int(sx2*w), int(sy2*h)
+                        cv2.rectangle(frame,
+                                      (x0+x+xa, y0+ya),
+                                      (x0+x+xb, y0+yb),
+                                      (255,0,0), 1)
         if reading == cand:
             streak += 1
         else:
@@ -182,8 +193,13 @@ def main():
         "--debounce", type=int, default=3,
         help="Frames a reading must persist before logging"
     )
+    p.add_argument(
+        "--debug", action="store_true",
+        help="Display digit and segment bounding boxes"
+    )
     args = p.parse_args()
-    capture_scale(args.output, camera_index=args.camera, debounce=args.debounce)
+    capture_scale(args.output, camera_index=args.camera, debounce=args.debounce,
+                  debug=args.debug)
 
 
 if __name__ == "__main__":

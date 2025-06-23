@@ -24,13 +24,14 @@ Arguments:
 - `output.csv`: Path to a CSV file where readings will be written. A matching Excel file (`.xlsx`) is also generated.
 - `--camera N`: Optional. Index of the webcam to use (default `0`).
 - `--debounce M`: Frames a reading must persist before logging (default `3`).
+- `--debug`: Show bounding boxes for digits and segments during capture.
 
 When started, the program detects the LCD region. It then prompts you to place a heavy weight on the scale so every digit shows `8`. Press `c` to capture the digit layout, remove the weight, and the program begins logging. Press `q` to stop.
 
 ## Example
 
 ```bash
-python scale_reader.py weights.csv --camera 0
+python scale_reader.py weights.csv --camera 0 --debug
 ```
 
-This records scale readings to `weights.csv` after a one-time calibration with a heavy weight.
+This records scale readings to `weights.csv` after a one-time calibration with a heavy weight. The `--debug` flag overlays digit and segment boxes for troubleshooting.
