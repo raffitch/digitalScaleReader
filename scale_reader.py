@@ -49,6 +49,9 @@ def preprocess_for_ocr(crop):
     # 6) Upscale 2× for Tesseract
     binary = cv2.resize(binary, None, fx=2, fy=2,
                         interpolation=cv2.INTER_CUBIC)
+    # 7) Add another 10px white border to avoid boundary artifacts
+    binary = cv2.copyMakeBorder(binary, 10,10,10,10,
+                                cv2.BORDER_CONSTANT, value=255)
     return binary
 
 
