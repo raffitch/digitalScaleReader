@@ -71,7 +71,12 @@ def find_green_roi(frame):
     return x, y, w, h
 
 
-def capture_scale(output_csv, camera_index=0, debounce=3):
+    """Return rough (x, width) boxes for each lit element.
+
+    The input should be a grayscale image where all digits are lit
+    (showing "8888").  Horizontal projection is used to find contiguous
+    runs of active columns corresponding to digits and decimal dots.
+    """
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
 def capture_scale(output_csv, camera_index=0, debounce=3, debug=False):
