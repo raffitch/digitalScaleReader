@@ -71,34 +71,6 @@ def find_green_roi(frame):
     return x, y, w, h
 
 
-def calibrate_digit_boxes(gray):
-    """Return rough x/width boxes for each lit element in the display."""
-    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    inv = cv2.bitwise_not(th)
-    proj = np.sum(inv>0, axis=0)
-    mask = proj > (gray.shape[0]*0.1)
-    runs = []
-    in_run = False
-    for i,m in enumerate(mask):
-        if m and not in_run:
-            in_run, start = True, i
-        if not m and in_run:
-            in_run, end = False, i
-            if end-start > 5:
-                runs.append((start,end))
-    if in_run:
-        runs.append((start,len(mask)))
-    boxes = []
-    for sx,ex in runs:
-        pad = int((ex-sx)*0.1)
-        x0 = max(0, sx-pad)
-        w  = min(gray.shape[1], ex+pad) - x0
-        boxes.append((x0, w))
-    return boxes
-
-
-# --- main capture loop --------------------------------------------
-
 def capture_scale(output_csv, camera_index=0, debounce=3):
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
