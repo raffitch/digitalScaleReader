@@ -35,10 +35,18 @@ def preprocess_for_ocr(crop):
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     # 3) Median blur to remove speckles
     binary = cv2.medianBlur(binary, 3)
-    # 4) Pad 10px white border so text isn't touching edges
+    # 4) Remove small artifacts (invert for connected components)
+    inv = cv2.bitwise_not(binary)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(inv, connectivity=8)
+    filtered = np.zeros_like(inv)
+    for i in range(1, n):
+        if stats[i, cv2.CC_STAT_AREA] >= 5:
+            filtered[labels == i] = 255
+    binary = cv2.bitwise_not(filtered)
+    # 5) Pad 10px white border so text isn't touching edges
     binary = cv2.copyMakeBorder(binary, 10,10,10,10,
                                 cv2.BORDER_CONSTANT, value=255)
-    # 5) Upscale 2× for Tesseract
+    # 6) Upscale 2× for Tesseract
     binary = cv2.resize(binary, None, fx=2, fy=2,
                         interpolation=cv2.INTER_CUBIC)
     return binary
