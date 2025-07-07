@@ -18,7 +18,7 @@ constexpr byte PIN_SCK  = 3;
 HX711 scale;
 
 // Set this to the slope from your one-time calibration (counts per gram)
-constexpr float COUNTS_PER_GRAM = 1000.0f;
+constexpr float COUNTS_PER_GRAM = -1153.584f;
 // Number of samples used to determine the tare offset on startup
 constexpr byte TARE_READS = 20;
 
