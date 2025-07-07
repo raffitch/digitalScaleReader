@@ -1,21 +1,28 @@
 /* --------------------------------------------------------
-   HX711 raw-stream firmware  –  v1.0
-   Outputs: <millis>\t<raw_counts>\n      @ 20 Hz
+   HX711 scale firmware  –  v2.0
+   Outputs: <millis>\t<grams>\n      @ 20 Hz
    -------------------------------------------------------- */
 
 #include <HX711.h>
 
-ew//pinout on scale driver
-//SCK yellow driver side /blue arduino side
-//DT orange driver side /green arduin o side
-//VCC white
-//GND black
+// Pinout on scale driver
+// SCK yellow driver side  / blue Arduino side
+// DT  orange driver side / green Arduino side
+// VCC white
+// GND black
 
 // Pin mapping – adjust to your wiring
 constexpr byte PIN_DOUT = 2;
 constexpr byte PIN_SCK  = 3;
 
 HX711 scale;
+
+// Set this to the slope from your one-time calibration (counts per gram)
+constexpr float COUNTS_PER_GRAM = 1000.0f;
+// Number of samples used to determine the tare offset on startup
+constexpr byte TARE_READS = 20;
+
+long offset = 0;   // determined during tare
 
 // -------- parameters you may tune -------------------------
 constexpr unsigned long SAMPLE_PERIOD_MS = 50;   // 20 Hz
@@ -28,7 +35,14 @@ void setup()
     while (!Serial) ;          // wait for host
 
     scale.begin(PIN_DOUT, PIN_SCK);
-    // No tare or calibration here – host does it.
+
+    // -------- tare on startup ---------------------------------------
+    long acc = 0;
+    for (byte i = 0; i < TARE_READS; ++i) {
+        while (!scale.is_ready()) {}
+        acc += scale.read();
+    }
+    offset = acc / TARE_READS;
 }
 
 void loop()
@@ -43,9 +57,10 @@ void loop()
         for (byte i = 0; i < SOFT_AVG; ++i)
             acc += scale.read();
         long raw = acc / SOFT_AVG;
+        float g = (raw - offset) / COUNTS_PER_GRAM;
 
         Serial.print(now);     // time-stamp first
         Serial.print('\t');
-        Serial.println(raw);   // raw 24-bit counts
+        Serial.println(g, 4);  // weight in grams
     }
 }
