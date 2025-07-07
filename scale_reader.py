@@ -3,7 +3,7 @@
 microfluidic_scale.py
 ---------------------
 • auto-detect serial port
-• warm-up & interactive two-point calibration
+• reads grams directly from the HX711 firmware
 • optional density → volume & flow
 • live weight plot with 15 min sliding window + on-plot numeric readout
 • CSV log: time_s, grams, millilitres, mL_s
@@ -62,8 +62,8 @@ def read_line(ser: serial.Serial):
     if not line:
         return None
     try:
-        t_ms, raw = line.split('\t')
-        return int(t_ms), int(raw)
+        t_ms, g = line.split('\t')
+        return int(t_ms), float(g)
     except ValueError:
         return None
 
@@ -81,31 +81,9 @@ def main():
     time.sleep(2)
     ser.reset_input_buffer()
 
-    # ---------- two-point calibration ------------------------------------
-    print("\n=== ZERO (tare) ===")
-    input(" → Ensure the scale is empty and press Enter…")
-    time.sleep(0.5)
-    ser.reset_input_buffer()
-    offset = median_with_progress(ser, 20, "Tare")
-    print(f"Zero offset = {offset:.1f} counts")
-
-    print("\n=== GAIN calibration ===")
-    input("Place a known mass, press Enter when stable…")
-    time.sleep(0.5)
-    ser.reset_input_buffer()
-    raw_with_mass = median_with_progress(ser, 20, "Gain calibration")
-    while True:
-        try:
-            known_g = float(input("Enter that mass in grams: "))
-            if known_g <= 0:
-                raise ValueError
-            break
-        except ValueError:
-            print("Please type a positive number.")
-    counts_per_gram = (raw_with_mass - offset) / known_g
-    print(f"Slope = {counts_per_gram:.2f} counts/g")
-    if abs(counts_per_gram) < 10:
-        print("⚠️  Warning: suspiciously small slope – check wiring/polarity.")
+    # ---------- setup -----------------------------------------------
+    print("\n=== READY ===")
+    print("Using weight in grams from firmware (tare is handled on boot)")
 
     # density?
     rho = args.density
@@ -137,7 +115,7 @@ def main():
     xs = deque(maxlen=int(WINDOW_SEC * 20))
     ys = deque(maxlen=int(WINDOW_SEC * 20))
     line_w, = ax_w.plot([], [], lw=1.4)
-    ax_w.set_ylim(0, known_g * 1.2)
+    ax_w.set_ylim(0, 10)
 
     if ax_f:
         line_f, = ax_f.plot([], [], lw=1.2, color='tab:red')
@@ -173,9 +151,8 @@ def main():
             pkt = read_line(ser)
             if not pkt:
                 continue
-            _, raw = pkt
+            _, g = pkt
 
-            g = (raw - offset) / counts_per_gram
             t_s = time.time() - t0
 
             if rho:
