@@ -1,210 +1,230 @@
 #!/usr/bin/env python3
 """
-scale_reader.py – Auto-detect a green backlit LCD, calibrate digit positions
-with a "heavy" weight, then read via seven-segment masks and log stable changes.
+microfluidic_scale.py
+---------------------
+• auto-detect serial port
+• warm-up & interactive two-point calibration
+• optional density → volume & flow
+• live weight plot with 15 min sliding window + on-plot numeric readout
+• CSV log: time_s, grams, millilitres, mL_s
 """
 
 import argparse
-from datetime import datetime
+import csv
+import sys
+import time
+import os
+from collections import deque
+import math                     # (only needed if you add EMA later)
 
-import cv2
 import numpy as np
-import pandas as pd
+import matplotlib.pyplot as plt
+import serial
+from serial.tools import list_ports
+from matplotlib.ticker import ScalarFormatter
 
-# --- seven-segment definitions ----------------------------------
-
-# each segment is defined by fractional (x1,y1)->(x2,y2) within a digit ROI
-SEGMENTS = {
-    0: ((0.15,0.05),(0.85,0.20)),  # top
-    1: ((0.80,0.15),(0.95,0.50)),  # top-right
-    2: ((0.80,0.50),(0.95,0.85)),  # bottom-right
-    3: ((0.15,0.80),(0.85,0.95)),  # bottom
-    4: ((0.05,0.50),(0.20,0.85)),  # bottom-left
-    5: ((0.05,0.15),(0.20,0.50)),  # top-left
-    6: ((0.15,0.45),(0.85,0.55)),  # middle
-}
-
-# map the set of "on" segments -> digit character
-DIGIT_MAP = {
-    frozenset([0,1,2,3,4,5])      : '0',
-    frozenset([1,2])              : '1',
-    frozenset([0,1,6,4,3])        : '2',
-    frozenset([0,1,6,2,3])        : '3',
-    frozenset([5,6,1,2])          : '4',
-    frozenset([0,5,6,2,3])        : '5',
-    frozenset([0,5,6,2,3,4])      : '6',
-    frozenset([0,1,2])            : '7',
-    frozenset([0,1,2,3,4,5,6])    : '8',
-    frozenset([0,1,2,3,5,6])      : '9',
-}
-
-def recognize_digit(bin_roi, on_thresh=0.5):
-    """Return the digit represented by a binarized ROI."""
-    h, w = bin_roi.shape
-    on = set()
-    for seg_id, ((x1,y1),(x2,y2)) in SEGMENTS.items():
-        xa, ya = int(x1*w), int(y1*h)
-        xb, yb = int(x2*w), int(y2*h)
-        patch = bin_roi[ya:yb, xa:xb]
-        if patch.size == 0:
-            continue
-        if cv2.countNonZero(patch) / float((xb-xa)*(yb-ya)) > on_thresh:
-            on.add(seg_id)
-    return DIGIT_MAP.get(frozenset(on), '?')
+WINDOW_SEC = 15 * 60            # 900 s = 15 min
 
 
-# --- ROI & calibration helpers ------------------------------------
+# ---------- helpers -------------------------------------------------------
+def median_with_progress(ser, n, label, bar_width=40):
+    buf = []
+    print(f"{label}:")
+    for i in range(n):
+        while True:
+            pkt = read_line(ser)
+            if pkt:
+                buf.append(pkt[1])
+                break
+        filled = int((i + 1) / n * bar_width)
+        bar = "#" * filled + "-" * (bar_width - filled)
+        sys.stdout.write(f"\r  [{bar}] {i + 1}/{n}")
+        sys.stdout.flush()
+    print()
+    return float(np.median(buf))
 
-def find_green_roi(frame):
-    """Locate the largest greenish region in the frame."""
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, (40,100,100), (90,255,255))
-    mask = cv2.morphologyEx(
-        mask, cv2.MORPH_OPEN,
-        cv2.getStructuringElement(cv2.MORPH_RECT, (5,5)),
-        iterations=2
-    )
-    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not cnts:
+
+def choose_port() -> str:
+    ports = list_ports.comports()
+    if not ports:
+        sys.exit("❌  No serial ports found.")
+    for i, p in enumerate(ports):
+        print(f"[{i}] {p.device} — {p.description}")
+    sel = input(f"Select port [0-{len(ports) - 1}]: ")
+    try:
+        return ports[int(sel)].device
+    except (ValueError, IndexError):
+        sys.exit("Invalid selection.")
+
+
+def read_line(ser: serial.Serial):
+    line = ser.readline().decode(errors='ignore').strip()
+    if not line:
         return None
-    x,y,w,h = cv2.boundingRect(max(cnts, key=cv2.contourArea))
-    return x, y, w, h
+    try:
+        t_ms, raw = line.split('\t')
+        return int(t_ms), int(raw)
+    except ValueError:
+        return None
 
 
-    """Return rough (x, width) boxes for each lit element.
-
-    The input should be a grayscale image where all digits are lit
-    (showing "8888").  Horizontal projection is used to find contiguous
-    runs of active columns corresponding to digits and decimal dots.
-    """
-    cap = cv2.VideoCapture(camera_index)
-    if not cap.isOpened():
-def capture_scale(output_csv, camera_index=0, debounce=3, debug=False):
-
-    print("Detecting screen… hold scale steady")
-    roi = None
-    while roi is None:
-        ret, frame = cap.read()
-        if not ret:
-            continue
-        roi = find_green_roi(frame)
-    x0,y0,w0,h0 = roi
-    print(f"  → ROI = x:{x0}, y:{y0}, w:{w0}, h:{h0}")
-
-    # --- calibration pass ---
-    print("Calibrating digit positions: place HEAVY weight on scale, then press 'c'")
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            continue
-        crop = frame[y0:y0+h0, x0:x0+w0]
-        cv2.imshow("Calibrate (press 'c')", crop)
-        if cv2.waitKey(1) & 0xFF == ord('c'):
-            break
-    cv2.destroyWindow("Calibrate (press 'c')")
-
-    gray0 = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    boxes = calibrate_digit_boxes(gray0)
-    if not boxes:
-        raise RuntimeError("Failed to find any digit boxes during calibration.")
-    widths = [w for _,w in boxes]
-    median_w = np.median(widths)
-    elems = []
-    for x,w in boxes:
-        kind = 'dot' if w < median_w*0.6 else 'digit'
-        elems.append((x,w,kind))
-    elems.sort(key=lambda t: t[0])
-    print(f"  → Found {sum(1 for _,_,k in elems if k=='digit')} digits "
-          f"and {sum(1 for _,_,k in elems if k=='dot')} dot(s).")
-
-    data, last, cand, streak = [], None, None, 0
-    print("Starting capture — press 'q' to quit")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        cv2.rectangle(frame, (x0,y0),(x0+w0,y0+h0),(0,255,0),2)
-        crop = frame[y0:y0+h0, x0:x0+w0]
-
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 0, 255,
-                                  cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        binary = cv2.morphologyEx(
-            binary, cv2.MORPH_CLOSE,
-            cv2.getStructuringElement(cv2.MORPH_RECT,(3,3)),
-            iterations=1
-        )
-
-        reading = ""
-        for x,w,kind in elems:
-            sub = binary[:, x:x+w]
-            if kind == 'digit':
-                reading += recognize_digit(sub)
-            else:
-                if cv2.countNonZero(sub) > 0:
-                    reading += '.'
-
-                if debug:
-                    cv2.rectangle(frame, (x0+x, y0), (x0+x+w, y0+h0),
-                                  (0,0,255), 1)
-                    h = sub.shape[0]
-                    for ((sx1,sy1),(sx2,sy2)) in SEGMENTS.values():
-                        xa, ya = int(sx1*w), int(sy1*h)
-                        xb, yb = int(sx2*w), int(sy2*h)
-                        cv2.rectangle(frame,
-                                      (x0+x+xa, y0+ya),
-                                      (x0+x+xb, y0+yb),
-                                      (255,0,0), 1)
-        if reading == cand:
-            streak += 1
-        else:
-            cand, streak = reading, 1
-
-        if cand and cand != last and streak >= debounce:
-            ts = datetime.now().isoformat(timespec="seconds")
-            print(f"{ts}: {cand}")
-            data.append({"timestamp": ts, "weight": cand})
-            last = cand
-
-        cv2.putText(frame, f"Value: {last or '-'}", (10,35),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
-        cv2.imshow("Live", frame)
-        cv2.imshow("Binary", binary)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-    if data:
-        df = pd.DataFrame(data)
-        df.to_csv(output_csv, index=False)
-        df.to_excel(output_csv.replace(".csv", ".xlsx"), index=False)
-        print(f"Saved {len(data)} readings to {output_csv}")
-    else:
-        print("No data captured.")
-
-
+# ---------- main ----------------------------------------------------------
 def main():
-    p = argparse.ArgumentParser(
-        description="Record scale readings via camera + seven-segment masks"
-    )
-    p.add_argument("output", help="Output CSV path")
-    p.add_argument("--camera", type=int, default=0, help="Camera index")
-    p.add_argument(
-        "--debounce", type=int, default=3,
-        help="Frames a reading must persist before logging"
-    )
-    p.add_argument(
-        "--debug", action="store_true",
-        help="Display digit and segment bounding boxes"
-    )
-    args = p.parse_args()
-    capture_scale(args.output, camera_index=args.camera, debounce=args.debounce,
-                  debug=args.debug)
+    parser = argparse.ArgumentParser(description="Gravimetric microfluidics logger")
+    parser.add_argument('--density', type=float,
+                        help="fluid density in g/mL (e.g. 0.997); omit to skip volume/flow")
+    args = parser.parse_args()
+
+    port = choose_port()
+    ser = serial.Serial(port, 115200, timeout=1)
+    print("🔌  Serial opened, waiting 2 s for first data…")
+    time.sleep(2)
+    ser.reset_input_buffer()
+
+    # ---------- two-point calibration ------------------------------------
+    print("\n=== ZERO (tare) ===")
+    input(" → Ensure the scale is empty and press Enter…")
+    time.sleep(0.5)
+    ser.reset_input_buffer()
+    offset = median_with_progress(ser, 20, "Tare")
+    print(f"Zero offset = {offset:.1f} counts")
+
+    print("\n=== GAIN calibration ===")
+    input("Place a known mass, press Enter when stable…")
+    time.sleep(0.5)
+    ser.reset_input_buffer()
+    raw_with_mass = median_with_progress(ser, 20, "Gain calibration")
+    while True:
+        try:
+            known_g = float(input("Enter that mass in grams: "))
+            if known_g <= 0:
+                raise ValueError
+            break
+        except ValueError:
+            print("Please type a positive number.")
+    counts_per_gram = (raw_with_mass - offset) / known_g
+    print(f"Slope = {counts_per_gram:.2f} counts/g")
+    if abs(counts_per_gram) < 10:
+        print("⚠️  Warning: suspiciously small slope – check wiring/polarity.")
+
+    # density?
+    rho = args.density
+    if rho:
+        print(f"Density set to {rho} g/mL → enabling volume & flow calc")
+    else:
+        print("No density given → skipping volume & flow.")
+
+    # ---------- CSV & plotting -------------------------------------------
+    fn = os.path.expanduser(f"~/Desktop/flow_{time.strftime('%Y%m%d-%H%M%S')}.csv")
+    csv_f = open(fn, 'w', newline='')
+    csv_w = csv.writer(csv_f)
+    header = ['time_s', 'weight_g']
+    if rho:
+        header += ['volume_mL', 'flow_mL_s']
+    csv_w.writerow(header)
+
+    if rho:
+        fig, (ax_w, ax_f) = plt.subplots(
+            2, 1, sharex=True, figsize=(8, 6),
+            gridspec_kw={'height_ratios': [3, 1]})
+    else:
+        fig, ax_w = plt.subplots(figsize=(8, 4))
+        ax_f = None
+
+    ax_w.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+    ax_w.ticklabel_format(axis='y', style='plain')
+
+    xs = deque(maxlen=int(WINDOW_SEC * 20))
+    ys = deque(maxlen=int(WINDOW_SEC * 20))
+    line_w, = ax_w.plot([], [], lw=1.4)
+    ax_w.set_ylim(0, known_g * 1.2)
+
+    if ax_f:
+        line_f, = ax_f.plot([], [], lw=1.2, color='tab:red')
+        xs_f = deque(maxlen=int(WINDOW_SEC * 20))
+        ys_f = deque(maxlen=int(WINDOW_SEC * 20))
+
+    ax_w.set_ylabel("Weight  [g]")
+    if ax_f:
+        ax_f.set_ylabel("Flow  [mL/s]")
+    ax_w.set_xlabel("Time  [s]")
+    fig.suptitle(f"Run started: {time.strftime('%Y-%m-%d  %H:%M:%S')}")
+
+    plt.ion()
+
+    # --- ADD 1: numeric on-plot readout ----------------------------------
+    txt_w = ax_w.text(0.02, 0.92, '', transform=ax_w.transAxes,
+                      ha='left', va='top',
+                      fontsize=10, weight='bold',
+                      bbox=dict(facecolor='w', alpha=0.65, boxstyle='round'))
+    if ax_f:
+        txt_f = ax_f.text(0.02, 0.92, '', transform=ax_f.transAxes,
+                          ha='left', va='top',
+                          fontsize=9,
+                          bbox=dict(facecolor='w', alpha=0.65, boxstyle='round'))
+
+    FLOW_WIN_SEC = 2.0
+    flow_buf = deque()
+
+    t0 = time.time()
+    print("\n📈  Logging…  Ctrl-C to stop.")
+    try:
+        while True:
+            pkt = read_line(ser)
+            if not pkt:
+                continue
+            _, raw = pkt
+
+            g = (raw - offset) / counts_per_gram
+            t_s = time.time() - t0
+
+            if rho:
+                vol = g / rho
+                flow_buf.append((t_s, vol))
+                while flow_buf and (t_s - flow_buf[0][0]) > FLOW_WIN_SEC:
+                    flow_buf.popleft()
+                if len(flow_buf) > 1:
+                    flow = (vol - flow_buf[0][1]) / (t_s - flow_buf[0][0])
+                else:
+                    flow = 0.0
+                csv_w.writerow([f"{t_s:.2f}", f"{g:.4f}",
+                                f"{vol:.4f}", f"{flow:.6f}"])
+            else:
+                csv_w.writerow([f"{t_s:.2f}", f"{g:.4f}"])
+
+            # ----------- plot update ------------------------------------
+            xs.append(t_s)
+            ys.append(g)
+            line_w.set_data(xs, ys)
+
+            if t_s > WINDOW_SEC:
+                ax_w.set_xlim(t_s - WINDOW_SEC, t_s)
+            else:
+                ax_w.set_xlim(0, WINDOW_SEC)
+
+            # --- ADD 2: update numeric readout for weight ---------------
+            txt_w.set_text(f"{g:,.3f} g")
+
+            if ax_f:
+                xs_f.append(t_s)
+                ys_f.append(flow)
+                line_f.set_data(xs_f, ys_f)
+                ax_f.set_xlim(ax_w.get_xlim())
+
+                # --- ADD 3: update numeric readout for flow -------------
+                txt_f.set_text(f"{flow:,.4f} mL/s")
+
+            plt.pause(0.001)
+
+    except KeyboardInterrupt:
+        print(f"\n🛑  Stopped. Data saved to {fn}")
+
+    finally:
+        csv_f.flush()
+        csv_f.close()
+        ser.close()
+        plt.ioff()
+        plt.show()
 
 
 if __name__ == "__main__":
