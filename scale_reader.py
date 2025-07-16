@@ -89,10 +89,12 @@ def calibration_routine(ser):
     print(f"Current COUNTS_PER_GRAM: {current}")
 
     input("Remove all weight from the scale, then press ENTER…")
+    ser.reset_input_buffer()
     tare = median_with_progress(ser, 20, "Taring")
     print(f"Zero reading: {tare:.4f} g")
 
     input("Place known mass on the scale, then press ENTER…")
+    ser.reset_input_buffer()
     mass_read = median_with_progress(ser, 20, "Reading mass")
     known = float(input("Enter mass in grams: "))
 
