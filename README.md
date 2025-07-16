@@ -44,3 +44,10 @@ The microcontroller firmware resides in `scaleReaderArduino.ino`. It reads the H
 - SCK → D7
 
 Compile the sketch with the ESP8266 board package and upload it to the NodeMCU. The firmware outputs readings at 20&nbsp;Hz in the format `<millis>\t<grams>`.
+
+## Calibration
+
+Run `python scale_reader.py`, choose your serial port and then select the
+*Calibrate* option. Follow the prompts to weigh a known mass. The script prints
+the computed `COUNTS_PER_GRAM` constant—update this value in
+`scaleReaderArduino.ino` and re-upload the firmware.

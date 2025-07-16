@@ -16,6 +16,7 @@ import time
 import os
 from collections import deque
 import math                     # (only needed if you add EMA later)
+import re
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -68,31 +69,50 @@ def read_line(ser: serial.Serial):
         return None
 
 
+def parse_counts_per_gram() -> float:
+    """Try to read COUNTS_PER_GRAM from the firmware file."""
+    ino_path = os.path.join(os.path.dirname(__file__), 'scaleReaderArduino.ino')
+    pat = re.compile(r'COUNTS_PER_GRAM\s*=\s*([-0-9.]+)')
+    try:
+        with open(ino_path) as f:
+            for line in f:
+                m = pat.search(line)
+                if m:
+                    return float(m.group(1))
+    except OSError:
+        pass
+    return -1153.584
+
+
+def calibration_routine(ser):
+    current = parse_counts_per_gram()
+    print(f"Current COUNTS_PER_GRAM: {current}")
+
+    input("Remove all weight from the scale, then press ENTER…")
+    tare = median_with_progress(ser, 20, "Taring")
+    print(f"Zero reading: {tare:.4f} g")
+
+    input("Place known mass on the scale, then press ENTER…")
+    mass_read = median_with_progress(ser, 20, "Reading mass")
+    known = float(input("Enter mass in grams: "))
+
+    new_cpg = (mass_read - tare) * current / known
+    print(f"\n➡  Calculated COUNTS_PER_GRAM = {new_cpg:.3f}")
+    print("Edit scaleReaderArduino.ino and update the COUNTS_PER_GRAM constant.")
+    ser.close()
+    return
+
+
 # ---------- main ----------------------------------------------------------
-def main():
-    parser = argparse.ArgumentParser(description="Gravimetric microfluidics logger")
-    parser.add_argument('--density', type=float,
-                        help="fluid density in g/mL (e.g. 0.997); omit to skip volume/flow")
-    args = parser.parse_args()
-
-    port = choose_port()
-    ser = serial.Serial(port, 115200, timeout=1)
-    print("🔌  Serial opened, waiting 2 s for first data…")
-    time.sleep(2)
-    ser.reset_input_buffer()
-
-    # ---------- setup -----------------------------------------------
+def weigh(ser, rho):
     print("\n=== READY ===")
     print("Using weight in grams from firmware (tare is handled on boot)")
 
-    # density?
-    rho = args.density
     if rho:
         print(f"Density set to {rho} g/mL → enabling volume & flow calc")
     else:
         print("No density given → skipping volume & flow.")
 
-    # ---------- CSV & plotting -------------------------------------------
     fn = os.path.expanduser(f"~/Desktop/flow_{time.strftime('%Y%m%d-%H%M%S')}.csv")
     csv_f = open(fn, 'w', newline='')
     csv_w = csv.writer(csv_f)
@@ -130,7 +150,6 @@ def main():
 
     plt.ion()
 
-    # --- ADD 1: numeric on-plot readout ----------------------------------
     txt_w = ax_w.text(0.02, 0.92, '', transform=ax_w.transAxes,
                       ha='left', va='top',
                       fontsize=10, weight='bold',
@@ -169,7 +188,6 @@ def main():
             else:
                 csv_w.writerow([f"{t_s:.2f}", f"{g:.4f}"])
 
-            # ----------- plot update ------------------------------------
             xs.append(t_s)
             ys.append(g)
             line_w.set_data(xs, ys)
@@ -179,7 +197,6 @@ def main():
             else:
                 ax_w.set_xlim(0, WINDOW_SEC)
 
-            # --- ADD 2: update numeric readout for weight ---------------
             txt_w.set_text(f"{g:,.3f} g")
 
             if ax_f:
@@ -188,7 +205,6 @@ def main():
                 line_f.set_data(xs_f, ys_f)
                 ax_f.set_xlim(ax_w.get_xlim())
 
-                # --- ADD 3: update numeric readout for flow -------------
                 txt_f.set_text(f"{flow:,.4f} mL/s")
 
             plt.pause(0.001)
@@ -202,6 +218,26 @@ def main():
         ser.close()
         plt.ioff()
         plt.show()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Gravimetric microfluidics logger")
+    parser.add_argument('--density', type=float,
+                        help="fluid density in g/mL (e.g. 0.997); omit to skip volume/flow")
+    args = parser.parse_args()
+
+    port = choose_port()
+    ser = serial.Serial(port, 115200, timeout=1)
+    print("🔌  Serial opened, waiting 2 s for first data…")
+    time.sleep(2)
+    ser.reset_input_buffer()
+
+    sel = input("\nSelect mode: [1] Weigh  [2] Calibrate → ").strip()
+    if sel == '2':
+        calibration_routine(ser)
+        return
+
+    weigh(ser, args.density)
 
 
 if __name__ == "__main__":
