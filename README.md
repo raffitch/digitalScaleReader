@@ -35,3 +35,12 @@ python scale_reader.py weights.csv --camera 0 --debug
 ```
 
 This records scale readings to `weights.csv` after a one-time calibration with a heavy weight. The `--debug` flag overlays digit and segment boxes for troubleshooting.
+
+## Firmware
+
+The microcontroller firmware resides in `scaleReaderArduino.ino`. It reads the HX711 load cell and streams the weight in grams over the serial port. When using an ESP8266 NodeMCU v2 connect the HX711 pins as follows:
+
+- DT → D6
+- SCK → D7
+
+Compile the sketch with the ESP8266 board package and upload it to the NodeMCU. The firmware outputs readings at 20&nbsp;Hz in the format `<millis>\t<grams>`.

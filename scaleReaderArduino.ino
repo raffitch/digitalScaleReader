@@ -6,14 +6,19 @@
 #include <HX711.h>
 
 // Pinout on scale driver
-// SCK yellow driver side  / blue Arduino side
-// DT  orange driver side / green Arduino side
+// SCK yellow driver side  / blue Arduino side (NodeMCU: D7)
+// DT  orange driver side / green Arduino side (NodeMCU: D6)
 // VCC white
 // GND black
 
 // Pin mapping – adjust to your wiring
+#ifdef ESP8266
+constexpr byte PIN_DOUT = D6;  // DT on NodeMCU v2
+constexpr byte PIN_SCK  = D7;  // SCK on NodeMCU v2
+#else
 constexpr byte PIN_DOUT = 2;
 constexpr byte PIN_SCK  = 3;
+#endif
 
 HX711 scale;
 
