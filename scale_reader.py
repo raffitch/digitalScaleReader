@@ -16,7 +16,6 @@ import time
 import os
 from collections import deque
 import math                     # (only needed if you add EMA later)
-import re
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -68,37 +67,21 @@ def read_line(ser: serial.Serial):
     except ValueError:
         return None
 
-
-def parse_counts_per_gram() -> float:
-    """Try to read COUNTS_PER_GRAM from the firmware file."""
-    ino_path = os.path.join(os.path.dirname(__file__), 'scaleReaderArduino.ino')
-    pat = re.compile(r'COUNTS_PER_GRAM\s*=\s*([-0-9.]+)')
-    try:
-        with open(ino_path) as f:
-            for line in f:
-                m = pat.search(line)
-                if m:
-                    return float(m.group(1))
-    except OSError:
-        pass
-    return -1153.584
-
-
 def calibration_routine(ser):
-    current = parse_counts_per_gram()
-    print(f"Current COUNTS_PER_GRAM: {current}")
+    print("Calibrating using raw counts…")
 
     input("Remove all weight from the scale, then press ENTER…")
     ser.reset_input_buffer()
     tare = median_with_progress(ser, 20, "Taring")
-    print(f"Zero reading: {tare:.4f} g")
+    print(f"Zero reading: {tare:.0f} counts")
 
     input("Place known mass on the scale, then press ENTER…")
     ser.reset_input_buffer()
     mass_read = median_with_progress(ser, 20, "Reading mass")
+    print(f"Mass reading: {mass_read:.0f} counts")
     known = float(input("Enter mass in grams: "))
 
-    new_cpg = (mass_read - tare) * current / known
+    new_cpg = (mass_read - tare) / known
     print(f"\n➡  Calculated COUNTS_PER_GRAM = {new_cpg:.3f}")
     print("Edit scaleReaderArduino.ino and update the COUNTS_PER_GRAM constant.")
     ser.close()

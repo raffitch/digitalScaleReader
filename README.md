@@ -47,7 +47,14 @@ Compile the sketch with the ESP8266 board package and upload it to the NodeMCU. 
 
 ## Calibration
 
-Run `python scale_reader.py`, choose your serial port and then select the
-*Calibrate* option. Follow the prompts to weigh a known mass. The script prints
-the computed `COUNTS_PER_GRAM` constant—update this value in
-`scaleReaderArduino.ino` and re-upload the firmware.
+1. Edit `scaleReaderArduino.ino` and temporarily set
+   `constexpr float COUNTS_PER_GRAM = 1.0f;` then upload the sketch. This causes
+   the firmware to stream raw HX711 counts.
+2. Run `python scale_reader.py`, choose your serial port and select the
+   *Calibrate* option. When prompted, remove all weight and then place a known
+   mass.
+3. Enter the exact weight and note the printed `COUNTS_PER_GRAM` value.
+4. Update the constant in `scaleReaderArduino.ino` with this value and upload
+   the firmware again.
+5. Subsequent runs of the script using the *Weigh* option will now report
+   weight in grams.
