@@ -58,3 +58,17 @@ Compile the sketch with the ESP8266 board package and upload it to the NodeMCU. 
    the firmware again.
 5. Subsequent runs of the script using the *Weigh* option will now report
    weight in grams.
+
+## Flowmeter Mode
+
+The Python tool also supports a simple pulse-counting mode for flowmeter
+experiments. After choosing the serial port, select the *Flowmeter* option.
+Commands while running:
+
+- `s` – start counting pulses and open the valve
+- `r` – reset the pulse counter and timer
+- `q` – stop and close the valve
+
+The console shows the total pulse count and the average frequency in
+pulses&nbsp;per&nbsp;second. Resets start a fresh run so averages never go
+negative and the valve engages immediately on `s`.

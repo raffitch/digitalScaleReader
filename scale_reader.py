@@ -16,6 +16,7 @@ import time
 import os
 from collections import deque
 import math                     # (only needed if you add EMA later)
+import select
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -86,6 +87,52 @@ def calibration_routine(ser):
     print("Edit scaleReaderArduino.ino and update the COUNTS_PER_GRAM constant.")
     ser.close()
     return
+
+
+def flowmeter_mode(ser):
+    """Read pulse counts and compute average frequency."""
+    print("\nCommands: s=start  r=reset  q=quit")
+    start_time = None
+    start_count = 0
+    last_count = 0
+    avg = 0.0
+
+    ser.reset_input_buffer()
+
+    while True:
+        if ser.in_waiting:
+            line = ser.readline().decode(errors='ignore').strip()
+            if line:
+                try:
+                    count = int(line)
+                except ValueError:
+                    continue
+                last_count = count
+                if start_time is not None:
+                    pulses = count - start_count
+                    elapsed = time.time() - start_time
+                    avg = pulses / elapsed if elapsed > 0 else 0.0
+                    sys.stdout.write(f"\rPulses: {pulses}\tAvg: {avg:.2f} Hz")
+                    sys.stdout.flush()
+
+        if select.select([sys.stdin], [], [], 0)[0]:
+            cmd = sys.stdin.readline().strip().lower()
+            if cmd == 's':
+                ser.reset_input_buffer()
+                ser.write(b'S')
+                start_count = last_count
+                start_time = time.time()
+                print("\n🚰  Started")
+            elif cmd == 'r':
+                ser.reset_input_buffer()
+                ser.write(b'R')
+                start_count = last_count
+                start_time = time.time()
+                print("\n🔄  Pulses reset")
+            elif cmd == 'q':
+                ser.write(b'E')
+                print("\nDone.")
+                break
 
 
 # ---------- main ----------------------------------------------------------
@@ -217,9 +264,12 @@ def main():
     time.sleep(2)
     ser.reset_input_buffer()
 
-    sel = input("\nSelect mode: [1] Weigh  [2] Calibrate → ").strip()
+    sel = input("\nSelect mode: [1] Weigh  [2] Calibrate  [3] Flowmeter → ").strip()
     if sel == '2':
         calibration_routine(ser)
+        return
+    if sel == '3':
+        flowmeter_mode(ser)
         return
 
     weigh(ser, args.density)
