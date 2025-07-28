@@ -16,6 +16,7 @@ import time
 import os
 from collections import deque
 import math                     # (only needed if you add EMA later)
+import select
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -67,32 +68,83 @@ def read_line(ser: serial.Serial):
     except ValueError:
         return None
 
+def calibration_routine(ser):
+    print("Calibrating using raw counts…")
 
-# ---------- main ----------------------------------------------------------
-def main():
-    parser = argparse.ArgumentParser(description="Gravimetric microfluidics logger")
-    parser.add_argument('--density', type=float,
-                        help="fluid density in g/mL (e.g. 0.997); omit to skip volume/flow")
-    args = parser.parse_args()
+    input("Remove all weight from the scale, then press ENTER…")
+    ser.reset_input_buffer()
+    tare = median_with_progress(ser, 20, "Taring")
+    print(f"Zero reading: {tare:.0f} counts")
 
-    port = choose_port()
-    ser = serial.Serial(port, 115200, timeout=1)
-    print("🔌  Serial opened, waiting 2 s for first data…")
-    time.sleep(2)
+    input("Place known mass on the scale, then press ENTER…")
+    ser.reset_input_buffer()
+    mass_read = median_with_progress(ser, 20, "Reading mass")
+    print(f"Mass reading: {mass_read:.0f} counts")
+    known = float(input("Enter mass in grams: "))
+
+    new_cpg = (mass_read - tare) / known
+    print(f"\n➡  Calculated COUNTS_PER_GRAM = {new_cpg:.3f}")
+    print("Edit scaleReaderArduino.ino and update the COUNTS_PER_GRAM constant.")
+    ser.close()
+    return
+
+
+def flowmeter_mode(ser):
+    """Read pulse counts and compute average frequency."""
+    print("\nCommands: s=start  r=reset  q=quit")
+    start_time = None
+    start_count = 0
+    last_count = 0
+    avg = 0.0
+
     ser.reset_input_buffer()
 
-    # ---------- setup -----------------------------------------------
+    while True:
+        if ser.in_waiting:
+            line = ser.readline().decode(errors='ignore').strip()
+            if line:
+                try:
+                    count = int(line)
+                except ValueError:
+                    continue
+                last_count = count
+                if start_time is not None:
+                    pulses = count - start_count
+                    elapsed = time.time() - start_time
+                    avg = pulses / elapsed if elapsed > 0 else 0.0
+                    sys.stdout.write(f"\rPulses: {pulses}\tAvg: {avg:.2f} Hz")
+                    sys.stdout.flush()
+
+        if select.select([sys.stdin], [], [], 0)[0]:
+            cmd = sys.stdin.readline().strip().lower()
+            if cmd == 's':
+                ser.reset_input_buffer()
+                ser.write(b'S')
+                start_count = last_count
+                start_time = time.time()
+                print("\n🚰  Started")
+            elif cmd == 'r':
+                ser.reset_input_buffer()
+                ser.write(b'R')
+                start_count = last_count
+                start_time = time.time()
+                print("\n🔄  Pulses reset")
+            elif cmd == 'q':
+                ser.write(b'E')
+                print("\nDone.")
+                break
+
+
+# ---------- main ----------------------------------------------------------
+def weigh(ser, rho):
     print("\n=== READY ===")
     print("Using weight in grams from firmware (tare is handled on boot)")
 
-    # density?
-    rho = args.density
     if rho:
         print(f"Density set to {rho} g/mL → enabling volume & flow calc")
     else:
         print("No density given → skipping volume & flow.")
 
-    # ---------- CSV & plotting -------------------------------------------
     fn = os.path.expanduser(f"~/Desktop/flow_{time.strftime('%Y%m%d-%H%M%S')}.csv")
     csv_f = open(fn, 'w', newline='')
     csv_w = csv.writer(csv_f)
@@ -130,7 +182,6 @@ def main():
 
     plt.ion()
 
-    # --- ADD 1: numeric on-plot readout ----------------------------------
     txt_w = ax_w.text(0.02, 0.92, '', transform=ax_w.transAxes,
                       ha='left', va='top',
                       fontsize=10, weight='bold',
@@ -169,7 +220,6 @@ def main():
             else:
                 csv_w.writerow([f"{t_s:.2f}", f"{g:.4f}"])
 
-            # ----------- plot update ------------------------------------
             xs.append(t_s)
             ys.append(g)
             line_w.set_data(xs, ys)
@@ -179,7 +229,6 @@ def main():
             else:
                 ax_w.set_xlim(0, WINDOW_SEC)
 
-            # --- ADD 2: update numeric readout for weight ---------------
             txt_w.set_text(f"{g:,.3f} g")
 
             if ax_f:
@@ -188,7 +237,6 @@ def main():
                 line_f.set_data(xs_f, ys_f)
                 ax_f.set_xlim(ax_w.get_xlim())
 
-                # --- ADD 3: update numeric readout for flow -------------
                 txt_f.set_text(f"{flow:,.4f} mL/s")
 
             plt.pause(0.001)
@@ -202,6 +250,29 @@ def main():
         ser.close()
         plt.ioff()
         plt.show()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Gravimetric microfluidics logger")
+    parser.add_argument('--density', type=float,
+                        help="fluid density in g/mL (e.g. 0.997); omit to skip volume/flow")
+    args = parser.parse_args()
+
+    port = choose_port()
+    ser = serial.Serial(port, 115200, timeout=1)
+    print("🔌  Serial opened, waiting 2 s for first data…")
+    time.sleep(2)
+    ser.reset_input_buffer()
+
+    sel = input("\nSelect mode: [1] Weigh  [2] Calibrate  [3] Flowmeter → ").strip()
+    if sel == '2':
+        calibration_routine(ser)
+        return
+    if sel == '3':
+        flowmeter_mode(ser)
+        return
+
+    weigh(ser, args.density)
 
 
 if __name__ == "__main__":
